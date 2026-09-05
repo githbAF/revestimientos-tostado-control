@@ -330,9 +330,18 @@ function scheduleAutoSync(){
 
 const TABLES = ['entidades','obras','movimientos','cheques','deudas'];
 const DATE_FIELDS_BY_TABLE = { movimientos:['fecha'], obras:['fechaInicio'], cheques:['fechaEmision','fechaVencimiento','fechaEntrega'], deudas:['fechaFactura','fechaVencimiento'] };
+const STRING_FIELDS_BY_TABLE = { entidades:['nombre','contacto','notas'], obras:['nombre'], movimientos:['concepto'], cheques:['numero','banco','notas'], deudas:['concepto'] };
 function sanitizeDates_(table, rows){
   const fields = DATE_FIELDS_BY_TABLE[table] || [];
   if(fields.length) rows.forEach(r=> fields.forEach(f=>{ if(r[f]) r[f] = normDate(r[f]); }));
+  return rows;
+}
+function sanitizeStrings_(table, rows){
+  // Google Sheets a veces guarda como número una celda que "parece" numérica
+  // (ej. un N° de cheque como "45698"). Forzamos texto para evitar que se
+  // rompan .trim()/.toLowerCase() al buscar o filtrar por esos campos.
+  const fields = STRING_FIELDS_BY_TABLE[table] || [];
+  if(fields.length) rows.forEach(r=> fields.forEach(f=>{ if(r[f]!=null && typeof r[f] !== 'string') r[f] = String(r[f]); }));
   return rows;
 }
 async function loadAll(){
@@ -342,8 +351,8 @@ async function loadAll(){
   }
   let anyFailure = false;
   await Promise.all(TABLES.map(async t=>{
-    try{ const rows = sanitizeDates_(t, await apiList(t)); state[t] = rows; cacheSetList(t, rows); }
-    catch(e){ anyFailure = true; state[t] = sanitizeDates_(t, cacheGetList(t) || []); }
+    try{ const rows = sanitizeStrings_(t, sanitizeDates_(t, await apiList(t))); state[t] = rows; cacheSetList(t, rows); }
+    catch(e){ anyFailure = true; state[t] = sanitizeStrings_(t, sanitizeDates_(t, cacheGetList(t) || [])); }
   }));
   try{
     const rows = await apiList('settings');
@@ -670,7 +679,7 @@ function renderChart(data, unidad){
 
 /* ============ ENTIDADES + OBRAS ============ */
 function viewEntidades(){
-  const q = (state.searchEntidades||'').trim().toLowerCase();
+  const q = String(state.searchEntidades||'').trim().toLowerCase();
   let clientList = clientes();
   if(q) clientList = clientList.filter(c=> c.nombre.toLowerCase().includes(q) || obrasDeCliente(c.id).some(o=>o.nombre.toLowerCase().includes(q)));
   return `
@@ -880,7 +889,7 @@ function viewCheques(){
   const cobrar = state.cheques.filter(c=>c.direccion==='recibido' && !c.entregadoA && c.estado==='pendiente').sort((a,b)=>(a.fechaVencimiento||'').localeCompare(b.fechaVencimiento||''));
   const pagar = state.cheques.filter(c=> (c.direccion==='emitido' || (c.direccion==='recibido' && c.entregadoA)) && c.estado==='pendiente').sort((a,b)=>(a.fechaVencimiento||'').localeCompare(b.fechaVencimiento||''));
   let list = sub==='cobrar'? cobrar : pagar;
-  const q = (state.searchCheques||'').trim().toLowerCase();
+  const q = String(state.searchCheques||'').trim().toLowerCase();
   if(q){
     list = list.filter(c=>{
       const contraparte = sub==='cobrar'? nombreEntidad(c.entidadId) : (c.entregadoA? nombreEntidad(c.entregadoA) : nombreEntidad(c.entidadId));
@@ -888,11 +897,15 @@ function viewCheques(){
     });
   }
 
+  const notice = state.chequeNotFoundNotice;
+  state.chequeNotFoundNotice = null;
+
   return `
     <div class="pagehead">
       <div><h1>Cheques</h1><div class="sub">Vencimientos de cheques recibidos (a cobrar) y de cheques usados para pagar a proveedores.</div></div>
       <button class="btn" data-open="modal-cheque">+ Nuevo cheque</button>
     </div>
+    ${notice? `<div class="alert-banner warn"><span class="stamp">Aviso</span><div>${escapeHtml(notice)}</div></div>` : ''}
     <div class="segctrl" style="width:fit-content;margin-bottom:16px">
       <button class="${sub==='cobrar'?'active':''}" data-cheque-sub="cobrar">Por cobrar (${cobrar.length})</button>
       <button class="${sub==='pagar'?'active':''}" data-cheque-sub="pagar">Por pagar (${pagar.length})</button>
@@ -950,7 +963,7 @@ function renderChequesHistorial(q){
 
 /* ============ PROVEEDORES (deudas y pagos) ============ */
 function viewProveedores(){
-  const q = (state.searchProveedores||'').trim().toLowerCase();
+  const q = String(state.searchProveedores||'').trim().toLowerCase();
   const pf = state.provFiltro || {desde:'', hasta:''};
   let provs = proveedores();
   if(q) provs = provs.filter(p=> p.nombre.toLowerCase().includes(q) || deudasDeProveedor(p.id).some(d=>d.concepto.toLowerCase().includes(q)));
@@ -1348,10 +1361,17 @@ function bindEvents(){
   document.querySelectorAll('[data-ver-cheque]').forEach(b=> b.onclick = ()=>{
     const id = b.dataset.verCheque;
     const c = state.cheques.find(x=>x.id===id);
-    if(!c){ showToast('Ese cheque ya no existe (puede haber sido eliminado).'); return; }
     state.activeTab = 'cheques';
-    state.chequesSub = (c.direccion==='recibido' && !c.entregadoA) ? 'cobrar' : 'pagar';
-    state.searchCheques = c.numero || '';
+    if(!c){
+      state.searchCheques = '';
+      state.chequeNotFoundNotice = 'No encontramos ese cheque en la lista actual — puede haber quedado de una versión anterior de la app, o haber sido eliminado. Buscalo manualmente arriba por número o banco.';
+    } else {
+      state.chequesSub = (c.direccion==='recibido' && !c.entregadoA) ? 'cobrar' : 'pagar';
+      state.searchCheques = c.numero || '';
+      state.chequeNotFoundNotice = c.estado!=='pendiente'
+        ? `Este cheque N° ${escapeHtml(c.numero||'s/n')} ya está marcado como "${c.estado}" — lo vas a encontrar en la sección "Historial", más abajo en esta misma pestaña (ya quedó filtrado por ese número).`
+        : null;
+    }
     render();
   });
 
