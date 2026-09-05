@@ -123,7 +123,8 @@
   .alert-banner ul{ margin:6px 0 0; padding-left:18px;}
   .alert-banner li{ margin-bottom:2px;}
 
-  table{ width:100%; border-collapse:collapse; font-size:13px;}
+  .table-scroll{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  table{ width:100%; min-width:640px; border-collapse:collapse; font-size:13px;}
   thead th{ text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft); font-weight:600; padding:6px 10px; border-bottom:1.5px solid var(--line);}
   tbody td{ padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:middle;}
   tbody tr:hover{ background:#F5F2EC; }
@@ -621,9 +622,9 @@ function viewDashboard(){
 }
 function renderTopClientes(){
   const rows = clientes().map(c=>({c, saldo:saldoCliente(c.id)})).sort((a,b)=>b.saldo-a.saldo).slice(0,6);
-  return `<table><thead><tr><th>Cliente</th><th class="num">Saldo pendiente</th></tr></thead><tbody>
+  return `<div class="table-scroll"><table><thead><tr><th>Cliente</th><th class="num">Saldo pendiente</th></tr></thead><tbody>
     ${rows.map(r=>`<tr><td>${escapeHtml(r.c.nombre)}</td><td class="num">${fmtMoney(r.saldo)}</td></tr>`).join('')}
-  </tbody></table>`;
+  </tbody></table></div>`;
 }
 
 const MESES_LARGO = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -692,10 +693,10 @@ function renderEntidadesSinObraNiTipoCliente(q){
   if(q) soloProv = soloProv.filter(p=>p.nombre.toLowerCase().includes(q));
   if(!soloProv.length) return '';
   return `<div class="panel"><h2>Proveedores (sin obra propia)</h2>
-    <table><thead><tr><th>Nombre</th><th>Contacto</th><th class="num">Saldo a pagar</th><th></th></tr></thead><tbody>
+    <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>Contacto</th><th class="num">Saldo a pagar</th><th></th></tr></thead><tbody>
     ${soloProv.map(p=>`<tr><td>${escapeHtml(p.nombre)}</td><td class="muted">${escapeHtml(p.contacto||'—')}</td><td class="num">${fmtMoney(saldoProveedor(p.id))}</td>
     <td><button class="btn ghost small" data-edit-entidad="${p.id}">Editar</button></td></tr>`).join('')}
-    </tbody></table></div>`;
+    </tbody></table></div></div>`;
 }
 function renderClienteCard(c){
   const obras = obrasDeCliente(c.id);
@@ -790,7 +791,7 @@ function viewMovimientos(){
         <div class="kpi"><div class="label">Resultado</div><div class="value ${(totalIn-totalOut)>=0?'pos':'neg'}">${fmtMoney(totalIn-totalOut)}</div></div>
       </div>
       ${list.length===0? `<div class="empty"><div class="big">No hay movimientos con estos filtros</div></div>` : `
-      <table><thead><tr><th>Fecha</th><th>Tipo</th><th>Entidad</th><th>Obra</th><th>Medio</th><th class="num">Monto</th><th>Concepto</th><th></th></tr></thead><tbody>
+      <div class="table-scroll"><table><thead><tr><th>Fecha</th><th>Tipo</th><th>Entidad</th><th>Obra</th><th>Medio</th><th class="num">Monto</th><th>Concepto</th><th></th></tr></thead><tbody>
         ${list.map(m=>`<tr>
           <td>${fmtDate(m.fecha)}</td>
           <td><span class="tag ${m.tipo==='ingreso'?'ok':'crit'}">${m.tipo}</span></td>
@@ -801,7 +802,7 @@ function viewMovimientos(){
           <td class="muted">${escapeHtml(m.concepto||'—')}</td>
           <td style="white-space:nowrap"><button class="btn ghost small" data-edit-mov="${m.id}">Editar</button> <button class="btn danger small" data-del-mov="${m.id}">Borrar</button></td>
         </tr>`).join('')}
-      </tbody></table>`}
+      </tbody></table></div>`}
     </div>
   `;
 }
@@ -857,7 +858,7 @@ function viewCobranzas(){
         <input type="text" id="cob-q" placeholder="🔍 Buscar cliente u obra…" value="${escapeHtml(f.q||'')}">
       </div>
       ${filas.length===0? `<div class="empty"><div class="big">No hay obras que coincidan con estos filtros</div></div>` : `
-      <table><thead><tr><th>Cliente</th><th>Obra</th><th class="num">Monto inicial</th><th class="num">Entregado</th><th class="num">% avance</th><th class="num">Saldo actual</th><th>Estado</th><th></th></tr></thead><tbody>
+      <div class="table-scroll"><table><thead><tr><th>Cliente</th><th>Obra</th><th class="num">Monto inicial</th><th class="num">Entregado</th><th class="num">% avance</th><th class="num">Saldo actual</th><th>Estado</th><th></th></tr></thead><tbody>
         ${filas.map(r=>`<tr>
           <td>${escapeHtml(r.cliente.nombre)}</td>
           <td class="muted">${escapeHtml(r.obra.nombre)}</td>
@@ -868,7 +869,7 @@ function viewCobranzas(){
           <td><span class="tag ${r.estado==='debe'?'crit':r.estado==='a_favor'?'ok':'neutral'}">${r.estado==='debe'?'Debe':r.estado==='a_favor'?'A favor':'Al día'}</span></td>
           <td><button class="btn ghost small" data-ver-mov-obra="${r.obra.id}|${r.cliente.id}">Ver movimientos</button></td>
         </tr>`).join('')}
-      </tbody></table>`}
+      </tbody></table></div>`}
     </div>
   `;
 }
@@ -908,7 +909,7 @@ function viewCheques(){
     </div>
     <div class="panel">
       ${list.length===0? `<div class="empty"><div class="big">${q? 'Ningún cheque coincide con la búsqueda' : 'No hay cheques en esta lista'}</div></div>` : `
-      <table><thead><tr><th>Vencimiento</th><th>Estado</th><th>N°</th><th>Banco</th><th>${sub==='cobrar'?'Cliente':'A pagar a'}</th><th class="num">Monto</th><th></th></tr></thead><tbody>
+      <div class="table-scroll"><table><thead><tr><th>Vencimiento</th><th>Estado</th><th>N°</th><th>Banco</th><th>${sub==='cobrar'?'Cliente':'A pagar a'}</th><th class="num">Monto</th><th></th></tr></thead><tbody>
         ${list.map(c=>{
           const ev = estadoVencimiento(c.fechaVencimiento);
           const contraparte = sub==='cobrar'? nombreEntidad(c.entidadId) : (c.entregadoA? nombreEntidad(c.entregadoA) : nombreEntidad(c.entidadId));
@@ -929,7 +930,7 @@ function viewCheques(){
             </td>
           </tr>`;
         }).join('')}
-      </tbody></table>`}
+      </tbody></table></div>`}
     </div>
     <div class="panel">
       <h2>Historial (cobrados / pagados / rechazados)</h2>
@@ -941,10 +942,10 @@ function renderChequesHistorial(q){
   let hist = state.cheques.filter(c=>c.estado!=='pendiente').sort((a,b)=>(b.fechaVencimiento||'').localeCompare(a.fechaVencimiento||''));
   if(q) hist = hist.filter(c=> (c.numero||'').toLowerCase().includes(q) || (c.banco||'').toLowerCase().includes(q) || nombreEntidad(c.entregadoA||c.entidadId).toLowerCase().includes(q));
   if(!hist.length) return `<div class="empty">${q? 'Ningún cheque del historial coincide con la búsqueda.' : 'Sin movimientos de cheques todavía.'}</div>`;
-  return `<table><thead><tr><th>Vencimiento</th><th>Estado</th><th>N°</th><th>Entidad</th><th class="num">Monto</th><th></th></tr></thead><tbody>
+  return `<div class="table-scroll"><table><thead><tr><th>Vencimiento</th><th>Estado</th><th>N°</th><th>Entidad</th><th class="num">Monto</th><th></th></tr></thead><tbody>
     ${hist.map(c=>`<tr><td>${fmtDate(c.fechaVencimiento)}</td><td><span class="tag ${c.estado==='rechazado'?'crit':'ok'}">${c.estado}</span></td><td class="muted">${escapeHtml(c.numero||'s/n')}</td><td>${escapeHtml(nombreEntidad(c.entregadoA||c.entidadId))}</td><td class="num">${fmtMoney(c.monto)}</td>
     <td style="white-space:nowrap"><button class="btn ghost small" data-cheque-estado="${c.id}|pendiente">Reabrir</button> <button class="btn ghost small" data-edit-cheque="${c.id}">Editar</button> <button class="btn danger small" data-del-cheque="${c.id}">Eliminar</button></td></tr>`).join('')}
-  </tbody></table>`;
+  </tbody></table></div>`;
 }
 
 /* ============ PROVEEDORES (deudas y pagos) ============ */
@@ -978,7 +979,7 @@ function viewProveedores(){
           <span class="saldo-pill" style="color:${saldo>0?'var(--brick)':'var(--green)'}">${saldo>0? 'Debe '+fmtMoney(saldo) : 'Al día'}</span>
         </div>
         ${deudas.length===0? `<div class="empty">${(pf.desde||pf.hasta)? 'Sin facturas en ese rango de fechas.' : 'Sin facturas cargadas.'}</div>` : `
-        <table><thead><tr><th>Concepto</th><th>Factura</th><th>Vence</th><th class="num">Monto</th><th class="num">Pagado</th><th class="num">Saldo</th><th></th></tr></thead><tbody>
+        <div class="table-scroll"><table><thead><tr><th>Concepto</th><th>Factura</th><th>Vence</th><th class="num">Monto</th><th class="num">Pagado</th><th class="num">Saldo</th><th></th></tr></thead><tbody>
         ${deudas.map(d=>{
           const s = saldoDeuda(d);
           return `<tr>
@@ -995,7 +996,7 @@ function viewProveedores(){
             </td>
           </tr>`;
         }).join('')}
-        </tbody></table>`}
+        </tbody></table></div>`}
       </div>`;
     }).join('')}
   `;
@@ -1023,9 +1024,9 @@ function viewGanancias(){
     <div class="panel">
       <h2>Detalle por período</h2>
       ${data.length===0? `<div class="empty">Sin movimientos cargados todavía.</div>` : `
-      <table><thead><tr><th>Período</th><th class="num">Ingresos</th><th class="num">Egresos</th><th class="num">Resultado</th></tr></thead><tbody>
+      <div class="table-scroll"><table><thead><tr><th>Período</th><th class="num">Ingresos</th><th class="num">Egresos</th><th class="num">Resultado</th></tr></thead><tbody>
       ${data.slice().reverse().map(d=>`<tr><td>${d.label}</td><td class="num">${fmtMoney(d.ingreso)}</td><td class="num">${fmtMoney(d.egreso)}</td><td class="num" style="color:${(d.ingreso-d.egreso)>=0?'var(--green)':'var(--red)'}">${fmtMoney(d.ingreso-d.egreso)}</td></tr>`).join('')}
-      </tbody></table>`}
+      </tbody></table></div>`}
     </div>
   `;
 }
