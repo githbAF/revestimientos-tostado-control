@@ -134,6 +134,7 @@
   .tag.cliente{ background:var(--steel-tint); color:var(--steel);}
   .tag.proveedor{ background:var(--brick-tint); color:var(--brick-dark);}
   .tag.ambos{ background:#EEE3EA; color:#7a3b63;}
+  .tag.gasto{ background:#E4E7DC; color:#4C5A34;}
   .tag.ok{ background:var(--green-tint); color:var(--green);}
   .tag.warn{ background:var(--amber-tint); color:var(--amber);}
   .tag.crit{ background:var(--red-tint); color:var(--red);}
@@ -478,6 +479,9 @@ function nombreEntidad(id){ const e=entidad(id); return e? e.nombre : '—'; }
 function obra(id){ return state.obras.find(o=>o.id===id); }
 function clientes(){ return state.entidades.filter(e=>e.tipo==='cliente'||e.tipo==='ambos'); }
 function proveedores(){ return state.entidades.filter(e=>e.tipo==='proveedor'||e.tipo==='ambos'); }
+function gastosFuncionamiento(){ return state.entidades.filter(e=>e.tipo==='gasto'); }
+function egresosDeEntidad(entidadId){ return state.movimientos.filter(m=>m.tipo==='egreso' && m.entidadId===entidadId).reduce((s,m)=>s+Number(m.monto),0); }
+function totalGastosFuncionamiento(){ return gastosFuncionamiento().reduce((s,e)=>s+egresosDeEntidad(e.id),0); }
 
 function montoActualObra(o){
   if(o.historial && o.historial.length) return o.historial[o.historial.length-1].montoNuevo;
@@ -618,6 +622,7 @@ function viewDashboard(){
       <div class="kpi"><div class="label">Deuda con proveedores</div><div class="value neg">${fmtMoney(totalDeudaProv)}</div><div class="note">Facturas pendientes de pago</div></div>
       <div class="kpi"><div class="label">Cheques por cobrar</div><div class="value">${porCobrar.length}</div><div class="note">${fmtMoney(porCobrar.reduce((s,c)=>s+Number(c.monto),0))} en cartera</div></div>
       <div class="kpi"><div class="label">Cheques por pagar</div><div class="value">${porPagar.length}</div><div class="note">${fmtMoney(porPagar.reduce((s,c)=>s+Number(c.monto),0))} comprometidos</div></div>
+      <div class="kpi"><div class="label">Gastos de funcionamiento</div><div class="value neg">${fmtMoney(totalGastosFuncionamiento())}</div><div class="note">Personal, tercerización y otros costos fijos</div></div>
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Ingresos vs. egresos — últimas semanas</h2></div>
@@ -695,6 +700,7 @@ function viewEntidades(){
     clientList.length===0 ? `<div class="empty">No hay clientes ni obras que coincidan con «${escapeHtml(state.searchEntidades)}».</div>` :
     clientList.map(c=>renderClienteCard(c)).join('')}
     ${renderEntidadesSinObraNiTipoCliente(q)}
+    ${renderGastosFuncionamiento(q)}
   `;
 }
 function renderEntidadesSinObraNiTipoCliente(q){
@@ -704,6 +710,20 @@ function renderEntidadesSinObraNiTipoCliente(q){
   return `<div class="panel"><h2>Proveedores (sin obra propia)</h2>
     <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>Contacto</th><th class="num">Saldo a pagar</th><th></th></tr></thead><tbody>
     ${soloProv.map(p=>`<tr><td>${escapeHtml(p.nombre)}</td><td class="muted">${escapeHtml(p.contacto||'—')}</td><td class="num">${fmtMoney(saldoProveedor(p.id))}</td>
+    <td><button class="btn ghost small" data-edit-entidad="${p.id}">Editar</button></td></tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+function labelCategoriaGasto(c){
+  return { empleado:'Personal en relación de dependencia', tercerizado:'Personal tercerizado', especializada:'Mano de obra especializada', otro:'Otro gasto fijo' }[c] || '—';
+}
+function renderGastosFuncionamiento(q){
+  let gastos = gastosFuncionamiento();
+  if(q) gastos = gastos.filter(p=>p.nombre.toLowerCase().includes(q));
+  if(!gastos.length) return '';
+  return `<div class="panel"><h2>Gastos de funcionamiento <span class="tag gasto">gasto</span></h2>
+    <p class="muted" style="font-size:12px;margin:-6px 0 12px">Personal, tercerización u otros gastos fijos de la empresa — no se les carga obra, son costos generales del negocio, no de un cliente puntual.</p>
+    <div class="table-scroll"><table><thead><tr><th>Nombre</th><th>Categoría</th><th>Contacto</th><th class="num">Total egresado</th><th></th></tr></thead><tbody>
+    ${gastos.map(p=>`<tr><td>${escapeHtml(p.nombre)}</td><td class="muted">${labelCategoriaGasto(p.categoriaGasto)}</td><td class="muted">${escapeHtml(p.contacto||'—')}</td><td class="num">${fmtMoney(egresosDeEntidad(p.id))}</td>
     <td><button class="btn ghost small" data-edit-entidad="${p.id}">Editar</button></td></tr>`).join('')}
     </tbody></table></div></div>`;
 }
@@ -770,6 +790,7 @@ function viewMovimientos(){
   const f = state.movFiltro || {};
   let list = state.movimientos.slice().sort((a,b)=>b.fecha.localeCompare(a.fecha));
   if(f.entidadId) list = list.filter(m=>m.entidadId===f.entidadId);
+  if(f.categoria) list = list.filter(m=>{ const e = entidad(m.entidadId); if(!e) return false; if(f.categoria==='cliente') return e.tipo==='cliente'||e.tipo==='ambos'; if(f.categoria==='proveedor') return e.tipo==='proveedor'||e.tipo==='ambos'; if(f.categoria==='gasto') return e.tipo==='gasto'; return true; });
   if(f.obraId) list = list.filter(m=>m.obraId===f.obraId);
   if(f.tipo) list = list.filter(m=>m.tipo===f.tipo);
   if(f.desde) list = list.filter(m=>m.fecha>=f.desde);
@@ -782,11 +803,17 @@ function viewMovimientos(){
 
   return `
     <div class="pagehead">
-      <div><h1>Ingresos y egresos</h1><div class="sub">Registrá cada entrega de dinero o pago, y filtrá por cliente, proveedor u obra.</div></div>
+      <div><h1>Ingresos y egresos</h1><div class="sub">Registrá cada entrega de dinero o pago, y filtrá por cliente, proveedor, gasto de funcionamiento u obra.</div></div>
       <button class="btn" data-open="modal-movimiento">+ Nuevo movimiento</button>
     </div>
     <div class="panel">
       <div class="filters">
+        <select id="f-categoria">
+          <option value="">Todas las categorías</option>
+          <option value="cliente" ${f.categoria==='cliente'?'selected':''}>Solo clientes</option>
+          <option value="proveedor" ${f.categoria==='proveedor'?'selected':''}>Solo proveedores</option>
+          <option value="gasto" ${f.categoria==='gasto'?'selected':''}>Solo gastos de funcionamiento</option>
+        </select>
         <select id="f-entidad"><option value="">Todas las entidades</option>${state.entidades.map(e=>`<option value="${e.id}" ${f.entidadId===e.id?'selected':''}>${escapeHtml(e.nombre)}</option>`).join('')}</select>
         <select id="f-obra"><option value="">${f.entidadId? 'Todas las obras de este cliente':'Todas las obras'}</option>${obrasFiltradas.map(o=>`<option value="${o.id}" ${f.obraId===o.id?'selected':''}>${escapeHtml(o.nombre)}</option>`).join('')}</select>
         <select id="f-tipo"><option value="">Ingresos y egresos</option><option value="ingreso" ${f.tipo==='ingreso'?'selected':''}>Solo ingresos</option><option value="egreso" ${f.tipo==='egreso'?'selected':''}>Solo egresos</option></select>
@@ -1050,16 +1077,26 @@ function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
 
 function modalEntidad(editId){
   const e = editId ? entidad(editId) : null;
+  const esGasto = e && e.tipo==='gasto';
   return `<div class="modal">
     <h3>${e?'Editar':'Nueva'} entidad</h3>
     <form id="form-entidad" data-id="${e?e.id:''}">
       <div class="form-grid">
         <label class="field full">Nombre<input type="text" name="nombre" required value="${e?escapeHtml(e.nombre):''}"></label>
         <label class="field">Tipo
-          <select name="tipo">
+          <select name="tipo" id="ent-tipo">
             <option value="cliente" ${e&&e.tipo==='cliente'?'selected':''}>Cliente</option>
             <option value="proveedor" ${e&&e.tipo==='proveedor'?'selected':''}>Proveedor</option>
-            <option value="ambos" ${e&&e.tipo==='ambos'?'selected':''}>Ambos</option>
+            <option value="ambos" ${e&&e.tipo==='ambos'?'selected':''}>Ambos (cliente y proveedor)</option>
+            <option value="gasto" ${e&&e.tipo==='gasto'?'selected':''}>Gasto de funcionamiento (personal, tercerización, etc.)</option>
+          </select>
+        </label>
+        <label class="field" id="ent-categoria-gasto-wrap" style="display:${esGasto?'flex':'none'}">Categoría de gasto
+          <select name="categoriaGasto">
+            <option value="empleado" ${e&&e.categoriaGasto==='empleado'?'selected':''}>Personal en relación de dependencia</option>
+            <option value="tercerizado" ${e&&e.categoriaGasto==='tercerizado'?'selected':''}>Personal tercerizado</option>
+            <option value="especializada" ${e&&e.categoriaGasto==='especializada'?'selected':''}>Mano de obra especializada</option>
+            <option value="otro" ${(!e||!e.categoriaGasto||e.categoriaGasto==='otro')?'selected':''}>Otro gasto fijo</option>
           </select>
         </label>
         <label class="field">Contacto<input type="text" name="contacto" value="${e?escapeHtml(e.contacto||''):''}"></label>
@@ -1082,7 +1119,7 @@ function modalObra(clienteIdFijo){
       <div class="form-grid">
         <label class="field full">Cliente<select name="entidadId" required>${opciones}</select></label>
         <label class="field full">Nombre de la obra<input type="text" name="nombre" required placeholder="Ej: Vivienda Barrio Norte"></label>
-        <label class="field">Monto inicial<input type="number" name="montoInicial" min="0" step="1" required></label>
+        <label class="field">Monto inicial<input type="text" inputmode="numeric" class="money-input" name="montoInicial" required></label>
         <label class="field">Fecha de inicio<input type="date" name="fechaInicio" value="${todayISO()}"></label>
       </div>
       <div class="modal-actions">
@@ -1101,7 +1138,7 @@ function modalObraEdit(obraId){
       <div class="form-grid">
         <label class="field full">Cliente<select name="entidadId" required>${clientes().map(c=>`<option value="${c.id}" ${o.entidadId===c.id?'selected':''}>${escapeHtml(c.nombre)}</option>`).join('')}</select></label>
         <label class="field full">Nombre de la obra<input type="text" name="nombre" required value="${escapeHtml(o.nombre)}"></label>
-        <label class="field">Monto inicial<input type="number" name="montoInicial" min="0" step="1" required value="${o.montoInicial}"></label>
+        <label class="field">Monto inicial<input type="text" inputmode="numeric" class="money-input" name="montoInicial" required value="${Number(o.montoInicial).toLocaleString('es-AR')}"></label>
         <label class="field">Fecha de inicio<input type="date" name="fechaInicio" value="${o.fechaInicio||''}"></label>
         <label class="field full">Estado<select name="estado"><option value="activa" ${o.estado==='activa'?'selected':''}>Activa</option><option value="finalizada" ${o.estado==='finalizada'?'selected':''}>Finalizada</option></select></label>
       </div>
@@ -1119,7 +1156,7 @@ function modalCosto(obraId){
     <form id="form-costo" data-obra-id="${o.id}">
       <div class="form-grid">
         <label class="field full">Concepto<input type="text" name="concepto" required placeholder="Ej: mano de obra, materiales..."></label>
-        <label class="field">Monto<input type="number" name="monto" min="0" step="1" required></label>
+        <label class="field">Monto<input type="text" inputmode="numeric" class="money-input" name="monto" required></label>
         <label class="field">Fecha<input type="date" name="fecha" value="${todayISO()}"></label>
       </div>
       <div class="modal-actions">
@@ -1136,7 +1173,7 @@ function modalModifObra(obraId){
     <p class="muted" style="margin-top:-8px">Monto actual: ${fmtMoney(montoActualObra(o))}</p>
     <form id="form-modif-obra" data-obra-id="${o.id}">
       <div class="form-grid">
-        <label class="field">Nuevo monto<input type="number" name="montoNuevo" min="0" step="1" required></label>
+        <label class="field">Nuevo monto<input type="text" inputmode="numeric" class="money-input" name="montoNuevo" required></label>
         <label class="field">Fecha<input type="date" name="fecha" value="${todayISO()}"></label>
         <label class="field full">Motivo<input type="text" name="motivo" placeholder="Ej: ampliación, ajuste por inflación..."></label>
       </div>
@@ -1149,17 +1186,45 @@ function modalModifObra(obraId){
 }
 function modalMovimiento(editId){
   const m = editId ? state.movimientos.find(x=>x.id===editId) : null;
-  const esCheque = m && m.medioPago==='cheque';
+  const esCheque = m && (m.medioPago==='cheque' || m.medioPago==='e-cheq');
   return `<div class="modal">
     <h3>${m?'Editar':'Nuevo'} movimiento</h3>
     <form id="form-movimiento" data-id="${m?m.id:''}">
       <div class="form-grid cols3">
         <label class="field">Tipo<select name="tipo" id="mov-tipo"><option value="ingreso" ${m&&m.tipo==='ingreso'?'selected':''}>Ingreso</option><option value="egreso" ${m&&m.tipo==='egreso'?'selected':''}>Egreso</option></select></label>
         <label class="field">Fecha<input type="date" name="fecha" value="${m?m.fecha:todayISO()}" required></label>
-        <label class="field">Medio de pago<select name="medioPago" id="mov-medio"><option value="efectivo" ${m&&m.medioPago==='efectivo'?'selected':''}>Efectivo</option><option value="transferencia" ${m&&m.medioPago==='transferencia'?'selected':''}>Transferencia</option><option value="cheque" ${m&&m.medioPago==='cheque'?'selected':''}>Cheque</option></select></label>
-        <label class="field full">Entidad<select name="entidadId" id="mov-entidad" required><option value="">Elegir…</option>${state.entidades.map(e=>`<option value="${e.id}" ${m&&m.entidadId===e.id?'selected':''}>${escapeHtml(e.nombre)} (${e.tipo})</option>`).join('')}</select></label>
+        <label class="field">Medio de pago<select name="medioPago" id="mov-medio"><option value="efectivo" ${m&&m.medioPago==='efectivo'?'selected':''}>Efectivo</option><option value="transferencia" ${m&&m.medioPago==='transferencia'?'selected':''}>Transferencia</option><option value="cheque" ${m&&m.medioPago==='cheque'?'selected':''}>Cheque</option><option value="e-cheq" ${m&&m.medioPago==='e-cheq'?'selected':''}>E-cheq</option></select></label>
+        <label class="field full">Entidad<select name="entidadId" id="mov-entidad" required><option value="">Elegir…</option>${state.entidades.map(e=>`<option value="${e.id}" ${m&&m.entidadId===e.id?'selected':''}>${escapeHtml(e.nombre)} (${e.tipo})</option>`).join('')}<option value="__nueva__">+ Añadir nueva entidad…</option></select></label>
+
+        <div id="mov-nueva-entidad-block" style="display:none; grid-column:1/-1; margin-top:2px; padding:14px; background:#F5F2EC; border:1px solid var(--line); border-radius:9px;">
+          <p class="muted" style="font-size:12px;margin:0 0 10px">Cargá la entidad nueva sin perder lo que ya completaste arriba.</p>
+          <div class="form-grid cols3">
+            <label class="field full">Nombre<input type="text" id="ne-nombre"></label>
+            <label class="field">Tipo
+              <select id="ne-tipo">
+                <option value="cliente">Cliente</option>
+                <option value="proveedor">Proveedor</option>
+                <option value="ambos">Ambos</option>
+                <option value="gasto">Gasto de funcionamiento</option>
+              </select>
+            </label>
+            <label class="field" id="ne-categoria-wrap" style="display:none">Categoría de gasto
+              <select id="ne-categoria">
+                <option value="empleado">Personal en relación de dependencia</option>
+                <option value="tercerizado">Personal tercerizado</option>
+                <option value="especializada">Mano de obra especializada</option>
+                <option value="otro" selected>Otro gasto fijo</option>
+              </select>
+            </label>
+          </div>
+          <div class="modal-actions" style="margin-top:8px">
+            <button type="button" class="btn secondary small" id="ne-cancelar">Cancelar</button>
+            <button type="button" class="btn small" id="ne-guardar">Guardar entidad y continuar</button>
+          </div>
+        </div>
+
         <label class="field full">Obra (opcional)<select name="obraId"><option value="">— Sin vincular a una obra —</option>${state.obras.map(o=>`<option value="${o.id}" ${m&&m.obraId===o.id?'selected':''}>${escapeHtml(o.nombre)} — ${escapeHtml(nombreEntidad(o.entidadId))}</option>`).join('')}</select></label>
-        <label class="field">Monto<input type="number" name="monto" id="mov-monto" min="0" step="1" required value="${m?m.monto:''}"></label>
+        <label class="field">Monto<input type="text" inputmode="numeric" class="money-input" name="monto" id="mov-monto" required value="${m?Number(m.monto).toLocaleString('es-AR'):''}"></label>
       </div>
 
       <div id="mov-cheque-block" style="display:${esCheque?'block':'none'}; margin-top:14px; padding:14px; background:#F5F2EC; border:1px solid var(--line); border-radius:9px;">
@@ -1209,7 +1274,7 @@ function modalCheque(editId){
         <label class="field full">Entidad (cliente si es recibido, proveedor si es emitido)<select name="entidadId" required>${state.entidades.map(e=>`<option value="${e.id}" ${c&&c.entidadId===e.id?'selected':''}>${escapeHtml(e.nombre)} (${e.tipo})</option>`).join('')}</select></label>
         <label class="field">N° de cheque<input type="text" name="numero" value="${c?escapeHtml(c.numero||''):''}"></label>
         <label class="field">Banco<input type="text" name="banco" value="${c?escapeHtml(c.banco||''):''}"></label>
-        <label class="field">Monto<input type="number" name="monto" min="0" step="1" required value="${c?c.monto:''}"></label>
+        <label class="field">Monto<input type="text" inputmode="numeric" class="money-input" name="monto" required value="${c?Number(c.monto).toLocaleString('es-AR'):''}"></label>
         <label class="field">Fecha de emisión<input type="date" name="fechaEmision" value="${c?c.fechaEmision||'':todayISO()}"></label>
         <label class="field">Fecha de vencimiento<input type="date" name="fechaVencimiento" required value="${c?c.fechaVencimiento:''}"></label>
         <label class="field full">Notas<input type="text" name="notas" value="${c?escapeHtml(c.notas||''):''}"></label>
@@ -1249,7 +1314,7 @@ function modalDeuda(editId){
         <label class="field full">Proveedor<select name="proveedorId" required>${proveedores().map(p=>`<option value="${p.id}" ${d&&d.proveedorId===p.id?'selected':''}>${escapeHtml(p.nombre)}</option>`).join('')}</select></label>
         <label class="field full">Concepto<input type="text" name="concepto" required placeholder="Ej: compra de cerámicos" value="${d?escapeHtml(d.concepto):''}"></label>
         <label class="field full">Obra relacionada (opcional)<select name="obraId"><option value="">— Ninguna —</option>${state.obras.map(o=>`<option value="${o.id}" ${d&&d.obraId===o.id?'selected':''}>${escapeHtml(o.nombre)}</option>`).join('')}</select></label>
-        <label class="field">Monto<input type="number" name="monto" min="0" step="1" required value="${d?d.monto:''}"></label>
+        <label class="field">Monto<input type="text" inputmode="numeric" class="money-input" name="monto" required value="${d?Number(d.monto).toLocaleString('es-AR'):''}"></label>
         <label class="field">Fecha de factura<input type="date" name="fechaFactura" value="${d?d.fechaFactura||'':todayISO()}"></label>
         <label class="field full">Fecha límite de pago (opcional)<input type="date" name="fechaVencimiento" value="${d?d.fechaVencimiento||'':''}"></label>
       </div>
@@ -1267,9 +1332,9 @@ function modalPagarDeuda(deudaId){
     <p class="muted" style="margin-top:-8px">Saldo pendiente: ${fmtMoney(saldoDeuda(d))}</p>
     <form id="form-pagar-deuda" data-deuda-id="${d.id}">
       <div class="form-grid">
-        <label class="field">Monto a pagar<input type="number" name="monto" min="0" step="1" required value="${saldoDeuda(d)}"></label>
+        <label class="field">Monto a pagar<input type="text" inputmode="numeric" class="money-input" name="monto" required value="${Number(saldoDeuda(d)).toLocaleString('es-AR')}"></label>
         <label class="field">Fecha<input type="date" name="fecha" value="${todayISO()}"></label>
-        <label class="field">Medio de pago<select name="medioPago"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option><option value="cheque">Cheque</option></select></label>
+        <label class="field">Medio de pago<select name="medioPago"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option><option value="cheque">Cheque</option><option value="e-cheq">E-cheq</option></select></label>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn secondary" id="btn-cancel">Cancelar</button>
@@ -1321,16 +1386,16 @@ function bindEvents(){
   document.querySelectorAll('[data-del-deuda]').forEach(b=> b.onclick = ()=>{ if(confirm('¿Eliminar esta factura/deuda? Se perderán también sus pagos registrados.')){ const id=b.dataset.delDeuda; state.deudas = state.deudas.filter(d=>d.id!==id); deleteRecord('deudas', id); render(); showToast('Deuda eliminada.'); } });
 
   // filtros de movimientos (vinculados entre sí: elegir cliente recorta las obras, y elegir obra completa el cliente)
-  const fe=document.getElementById('f-entidad'), fo=document.getElementById('f-obra'), ft=document.getElementById('f-tipo'), fd=document.getElementById('f-desde'), fh=document.getElementById('f-hasta'), fc=document.getElementById('f-clear');
+  const fcat=document.getElementById('f-categoria'), fe=document.getElementById('f-entidad'), fo=document.getElementById('f-obra'), ft=document.getElementById('f-tipo'), fd=document.getElementById('f-desde'), fh=document.getElementById('f-hasta'), fc=document.getElementById('f-clear');
   if(fe){
-    [fe,fo,ft,fd,fh].forEach(el=> el.onchange = ()=>{
+    [fcat,fe,fo,ft,fd,fh].forEach(el=> el.onchange = ()=>{
       let entidadId = fe.value, obraId = fo.value;
       if(el===fe){
         if(obraId){ const o = obra(obraId); if(!entidadId || (o && o.entidadId!==entidadId)) obraId=''; }
       } else if(el===fo){
         if(obraId){ const o = obra(obraId); if(o) entidadId = o.entidadId; }
       }
-      state.movFiltro = { entidadId, obraId, tipo:ft.value, desde:fd.value, hasta:fh.value };
+      state.movFiltro = { categoria:fcat.value, entidadId, obraId, tipo:ft.value, desde:fd.value, hasta:fh.value };
       render();
     });
     fc.onclick = ()=>{ state.movFiltro={}; render(); };
@@ -1392,13 +1457,26 @@ function fillDeudaOptions(){
   function refresh(){ const pid=sel.value; const ds = deudasDeProveedor(pid).filter(d=>saldoDeuda(d)>0); deudaSel.innerHTML = `<option value="">— Ninguna —</option>` + ds.map(d=>`<option value="${d.id}">${escapeHtml(d.concepto)} — saldo ${fmtMoney(saldoDeuda(d))}</option>`).join(''); }
   sel.onchange = refresh; refresh();
 }
+function wireMoneyInput(input){
+  input.addEventListener('input', ()=>{
+    const digits = input.value.replace(/\D/g,'');
+    input.value = digits ? Number(digits).toLocaleString('es-AR') : '';
+  });
+}
+function parseMoney(str){ return Number(String(str||'').replace(/\D/g,'')) || 0; }
+
 function bindModalEvents(){
   const cancel = document.getElementById('btn-cancel'); if(cancel) cancel.onclick = closeModal;
+  document.querySelectorAll('.money-input').forEach(wireMoneyInput);
 
   const fEnt = document.getElementById('form-entidad');
   if(fEnt){
+    const tipoSel = document.getElementById('ent-tipo');
+    const catWrap = document.getElementById('ent-categoria-gasto-wrap');
+    if(tipoSel && catWrap) tipoSel.onchange = ()=>{ catWrap.style.display = tipoSel.value==='gasto' ? 'flex' : 'none'; };
     fEnt.onsubmit = (e)=>{ e.preventDefault(); const fd=new FormData(fEnt);
-      const data = { nombre:fd.get('nombre').trim(), tipo:fd.get('tipo'), contacto:fd.get('contacto').trim(), notas:fd.get('notas').trim() };
+      const tipo = fd.get('tipo');
+      const data = { nombre:fd.get('nombre').trim(), tipo, categoriaGasto: tipo==='gasto' ? fd.get('categoriaGasto') : '', contacto:fd.get('contacto').trim(), notas:fd.get('notas').trim() };
       const id = fEnt.dataset.id;
       let rec;
       if(id){ rec = entidad(id); Object.assign(rec, data); } else { rec = {id:uid(), ...data}; state.entidades.push(rec); }
@@ -1410,7 +1488,7 @@ function bindModalEvents(){
 
   const fObra = document.getElementById('form-obra');
   if(fObra) fObra.onsubmit = (e)=>{ e.preventDefault(); const fd=new FormData(fObra);
-    const rec = { id:uid(), entidadId:fd.get('entidadId'), nombre:fd.get('nombre').trim(), montoInicial:Number(fd.get('montoInicial')), historial:[], costos:[], fechaInicio:fd.get('fechaInicio')||todayISO(), estado:'activa' };
+    const rec = { id:uid(), entidadId:fd.get('entidadId'), nombre:fd.get('nombre').trim(), montoInicial:parseMoney(fd.get('montoInicial')), historial:[], costos:[], fechaInicio:fd.get('fechaInicio')||todayISO(), estado:'activa' };
     state.obras.push(rec);
     saveRecord('obras', rec); closeModal(); render(); showToast('Obra creada.');
   };
@@ -1418,20 +1496,20 @@ function bindModalEvents(){
   const fCosto = document.getElementById('form-costo');
   if(fCosto) fCosto.onsubmit = (e)=>{ e.preventDefault(); const fd=new FormData(fCosto); const o = obra(fCosto.dataset.obraId);
     o.costos = o.costos||[];
-    o.costos.push({ id:uid(), concepto:fd.get('concepto').trim(), monto:Number(fd.get('monto')), fecha:fd.get('fecha')||todayISO() });
+    o.costos.push({ id:uid(), concepto:fd.get('concepto').trim(), monto:parseMoney(fd.get('monto')), fecha:fd.get('fecha')||todayISO() });
     saveRecord('obras', o); closeModal(); render(); showToast('Costo agregado.');
   };
 
   const fModif = document.getElementById('form-modif-obra');
   if(fModif) fModif.onsubmit = (e)=>{ e.preventDefault(); const fd=new FormData(fModif); const o = obra(fModif.dataset.obraId);
     const anterior = montoActualObra(o);
-    o.historial = o.historial||[]; o.historial.push({ fecha:fd.get('fecha')||todayISO(), montoAnterior:anterior, montoNuevo:Number(fd.get('montoNuevo')), motivo:fd.get('motivo').trim() });
+    o.historial = o.historial||[]; o.historial.push({ fecha:fd.get('fecha')||todayISO(), montoAnterior:anterior, montoNuevo:parseMoney(fd.get('montoNuevo')), motivo:fd.get('motivo').trim() });
     saveRecord('obras', o); closeModal(); render(); showToast('Monto de obra actualizado.');
   };
 
   const fObraEdit = document.getElementById('form-obra-edit');
   if(fObraEdit) fObraEdit.onsubmit = (e)=>{ e.preventDefault(); const fd=new FormData(fObraEdit); const o = obra(fObraEdit.dataset.id);
-    o.entidadId = fd.get('entidadId'); o.nombre = fd.get('nombre').trim(); o.montoInicial = Number(fd.get('montoInicial')); o.fechaInicio = fd.get('fechaInicio'); o.estado = fd.get('estado');
+    o.entidadId = fd.get('entidadId'); o.nombre = fd.get('nombre').trim(); o.montoInicial = parseMoney(fd.get('montoInicial')); o.fechaInicio = fd.get('fechaInicio'); o.estado = fd.get('estado');
     saveRecord('obras', o); closeModal(); render(); showToast('Obra actualizada.');
   };
 
@@ -1441,8 +1519,47 @@ function bindModalEvents(){
     const medioSel = document.getElementById('mov-medio');
     const chequeBlock = document.getElementById('mov-cheque-block');
     if(medioSel && chequeBlock){
-      medioSel.onchange = ()=>{ chequeBlock.style.display = medioSel.value==='cheque' ? 'block' : 'none'; };
+      medioSel.onchange = ()=>{ chequeBlock.style.display = (medioSel.value==='cheque'||medioSel.value==='e-cheq') ? 'block' : 'none'; };
     }
+    // alta rápida de una entidad nueva sin perder lo ya cargado en el movimiento
+    const entidadSel = document.getElementById('mov-entidad');
+    const neBlock = document.getElementById('mov-nueva-entidad-block');
+    const neTipo = document.getElementById('ne-tipo');
+    const neCatWrap = document.getElementById('ne-categoria-wrap');
+    if(entidadSel && neBlock){
+      entidadSel.onchange = ()=>{
+        if(entidadSel.value==='__nueva__'){
+          neBlock.style.display='block';
+          entidadSel.value='';
+          document.getElementById('ne-nombre').focus();
+        } else {
+          neBlock.style.display='none';
+        }
+      };
+      if(neTipo) neTipo.onchange = ()=>{ neCatWrap.style.display = neTipo.value==='gasto' ? 'flex' : 'none'; };
+      document.getElementById('ne-cancelar').onclick = ()=>{
+        neBlock.style.display='none';
+        document.getElementById('ne-nombre').value='';
+        neTipo.value='cliente'; neCatWrap.style.display='none';
+      };
+      document.getElementById('ne-guardar').onclick = ()=>{
+        const nombre = document.getElementById('ne-nombre').value.trim();
+        if(!nombre){ alert('Falta el nombre de la entidad nueva.'); return; }
+        const tipo = neTipo.value;
+        const rec = { id:uid(), nombre, tipo, categoriaGasto: tipo==='gasto' ? document.getElementById('ne-categoria').value : '', contacto:'', notas:'' };
+        state.entidades.push(rec);
+        saveRecord('entidades', rec);
+        const opt = document.createElement('option');
+        opt.value = rec.id; opt.textContent = `${rec.nombre} (${rec.tipo})`;
+        entidadSel.insertBefore(opt, entidadSel.lastElementChild);
+        entidadSel.value = rec.id;
+        neBlock.style.display='none';
+        document.getElementById('ne-nombre').value='';
+        neTipo.value='cliente'; neCatWrap.style.display='none';
+        showToast('Entidad agregada.');
+      };
+    }
+
     const btnNuevo = document.getElementById('cheque-modo-nuevo');
     const btnExistente = document.getElementById('cheque-modo-existente');
     const blockNuevo = document.getElementById('cheque-modo-block-nuevo');
@@ -1453,7 +1570,7 @@ function bindModalEvents(){
     }
 
     fMov.onsubmit = (e)=>{ e.preventDefault(); const fd=new FormData(fMov);
-      const esCheque = fd.get('medioPago')==='cheque';
+      const esCheque = fd.get('medioPago')==='cheque' || fd.get('medioPago')==='e-cheq';
       const modoNuevo = esCheque && btnNuevo && btnNuevo.classList.contains('active');
       let chequeId = fd.get('chequeId') || null;
 
@@ -1467,7 +1584,7 @@ function bindModalEvents(){
           entidadId: fd.get('entidadId'),
           numero: (fd.get('chNumero')||'').trim(),
           banco: (fd.get('chBanco')||'').trim(),
-          monto: Number(fd.get('monto')),
+          monto: parseMoney(fd.get('monto')),
           fechaEmision: fd.get('fecha') || todayISO(),
           fechaVencimiento: venc,
           estado: 'pendiente',
@@ -1479,7 +1596,7 @@ function bindModalEvents(){
         chequeId = chequeRec.id;
       }
 
-      const data = { fecha:fd.get('fecha'), tipo:fd.get('tipo'), entidadId:fd.get('entidadId'), obraId:fd.get('obraId')||null, medioPago:fd.get('medioPago'), monto:Number(fd.get('monto')), concepto:fd.get('concepto').trim(), chequeId };
+      const data = { fecha:fd.get('fecha'), tipo:fd.get('tipo'), entidadId:fd.get('entidadId'), obraId:fd.get('obraId')||null, medioPago:fd.get('medioPago'), monto:parseMoney(fd.get('monto')), concepto:fd.get('concepto').trim(), chequeId };
       const id = fMov.dataset.id;
       let rec;
       if(id){ rec = state.movimientos.find(m=>m.id===id); Object.assign(rec, data); } else { rec = { id:uid(), ...data }; state.movimientos.push(rec); }
@@ -1489,7 +1606,7 @@ function bindModalEvents(){
 
   const fCheque = document.getElementById('form-cheque');
   if(fCheque) fCheque.onsubmit = (e)=>{ e.preventDefault(); const fd=new FormData(fCheque);
-    const data = { direccion:fd.get('direccion'), entidadId:fd.get('entidadId'), numero:fd.get('numero').trim(), banco:fd.get('banco').trim(), monto:Number(fd.get('monto')), fechaEmision:fd.get('fechaEmision'), fechaVencimiento:fd.get('fechaVencimiento'), notas:fd.get('notas').trim() };
+    const data = { direccion:fd.get('direccion'), entidadId:fd.get('entidadId'), numero:fd.get('numero').trim(), banco:fd.get('banco').trim(), monto:parseMoney(fd.get('monto')), fechaEmision:fd.get('fechaEmision'), fechaVencimiento:fd.get('fechaVencimiento'), notas:fd.get('notas').trim() };
     const id = fCheque.dataset.id;
     let rec;
     if(id){ rec = state.cheques.find(c=>c.id===id); Object.assign(rec, data); } else { rec = { id:uid(), ...data, estado:'pendiente', entregadoA:null }; state.cheques.push(rec); }
@@ -1507,7 +1624,7 @@ function bindModalEvents(){
 
   const fDeuda = document.getElementById('form-deuda');
   if(fDeuda) fDeuda.onsubmit = (e)=>{ e.preventDefault(); const fd=new FormData(fDeuda);
-    const data = { proveedorId:fd.get('proveedorId'), concepto:fd.get('concepto').trim(), obraId:fd.get('obraId')||null, monto:Number(fd.get('monto')), fechaFactura:fd.get('fechaFactura'), fechaVencimiento:fd.get('fechaVencimiento')||null };
+    const data = { proveedorId:fd.get('proveedorId'), concepto:fd.get('concepto').trim(), obraId:fd.get('obraId')||null, monto:parseMoney(fd.get('monto')), fechaFactura:fd.get('fechaFactura'), fechaVencimiento:fd.get('fechaVencimiento')||null };
     const id = fDeuda.dataset.id;
     let rec;
     if(id){ rec = state.deudas.find(x=>x.id===id); Object.assign(rec, data); } else { rec = { id:uid(), ...data, estado:'pendiente', pagos:[] }; state.deudas.push(rec); }
@@ -1516,7 +1633,7 @@ function bindModalEvents(){
 
   const fPagar = document.getElementById('form-pagar-deuda');
   if(fPagar) fPagar.onsubmit = (e)=>{ e.preventDefault(); const fd=new FormData(fPagar); const d = state.deudas.find(x=>x.id===fPagar.dataset.deudaId);
-    const monto = Number(fd.get('monto')); const fecha = fd.get('fecha')||todayISO(); const medioPago = fd.get('medioPago');
+    const monto = parseMoney(fd.get('monto')); const fecha = fd.get('fecha')||todayISO(); const medioPago = fd.get('medioPago');
     d.pagos = d.pagos||[]; d.pagos.push({ fecha, monto, medioPago });
     const movRec = { id:uid(), fecha, tipo:'egreso', entidadId:d.proveedorId, obraId:d.obraId||null, medioPago, monto, concepto:'Pago — '+d.concepto, chequeId:null };
     state.movimientos.push(movRec);
